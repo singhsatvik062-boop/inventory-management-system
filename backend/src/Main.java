@@ -5,31 +5,20 @@ import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.sql.*;
 import java.util.*;
 
 public class Main {
 
-    private static final String DB_URL =
-            "jdbc:mysql://localhost:3306/inventory_db";
-    private static final String DB_USER = "root";
-
-    // PUT YOUR MYSQL ROOT PASSWORD HERE
-    private static final String DB_PASSWORD = "satvik@12";
-
-    public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
-    }
+    private static final List<Map<String, Object>> products = new ArrayList<>();
+    private static int nextId = 1;
 
     public static void main(String[] args) throws Exception {
 
-        // Test MySQL
-        try (Connection conn = getConnection()) {
-            System.out.println("MySQL Connected Successfully!");
-        }
+        int port = Integer.parseInt(
+                System.getenv().getOrDefault("PORT", "8080"));
 
         HttpServer server =
-                HttpServer.create(new InetSocketAddress(8080), 0);
+                HttpServer.create(new InetSocketAddress(port), 0);
 
         server.createContext("/api/products", Main::handleProducts);
         server.createContext("/api/add", Main::handleAdd);
@@ -40,14 +29,9 @@ public class Main {
         server.setExecutor(null);
         server.start();
 
-        System.out.println("======================================");
-        System.out.println(" Inventory Management System");
-        System.out.println(" Server running at:");
-        System.out.println(" http://localhost:8080");
-        System.out.println("======================================");
+        System.out.println("Server running on port " + port);
     }
 
-    // GET /api/products
     private static void handleProducts(HttpExchange exchange)
             throws IOException {
 
@@ -56,47 +40,9 @@ public class Main {
             return;
         }
 
-        StringBuilder json = new StringBuilder("[");
-        boolean first = true;
-
-        String sql = "SELECT * FROM products ORDER BY id";
-
-        try (Connection conn = getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-
-            while (rs.next()) {
-
-                if (!first) {
-                    json.append(",");
-                }
-
-                json.append("{");
-                json.append("\"id\":").append(rs.getInt("id")).append(",");
-                json.append("\"name\":\"")
-                        .append(escape(rs.getString("name"))).append("\",");
-                json.append("\"category\":\"")
-                        .append(escape(rs.getString("category"))).append("\",");
-                json.append("\"quantity\":")
-                        .append(rs.getInt("quantity")).append(",");
-                json.append("\"price\":")
-                        .append(rs.getBigDecimal("price"));
-                json.append("}");
-
-                first = false;
-            }
-
-        } catch (SQLException e) {
-            send(exchange, "{\"error\":\"Database error\"}", 500);
-            return;
-        }
-
-        json.append("]");
-
-        sendJson(exchange, json.toString());
+        sendJson(exchange, productsToJson(products));
     }
 
-    // POST /api/add
     private static void handleAdd(HttpExchange exchange)
             throws IOException {
 
@@ -108,33 +54,22 @@ public class Main {
         Map<String, String> data =
                 parseForm(readBody(exchange));
 
-        String sql =
-                "INSERT INTO products (name, category, quantity, price) " +
-                "VALUES (?, ?, ?, ?)";
+        Map<String, Object> p = new HashMap<>();
 
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+        p.put("id", nextId++);
+        p.put("name", data.getOrDefault("name", ""));
+        p.put("category", data.getOrDefault("category", ""));
+        p.put("quantity",
+                Integer.parseInt(data.getOrDefault("quantity", "0")));
+        p.put("price",
+                Double.parseDouble(data.getOrDefault("price", "0")));
 
-            stmt.setString(1, data.get("name"));
-            stmt.setString(2, data.get("category"));
-            stmt.setInt(3, Integer.parseInt(data.get("quantity")));
-            stmt.setBigDecimal(4,
-                    new java.math.BigDecimal(data.get("price")));
+        products.add(p);
 
-            stmt.executeUpdate();
-
-            sendJson(exchange,
-                    "{\"success\":true,\"message\":\"Product added successfully\"}");
-
-        } catch (Exception e) {
-
-            sendJson(exchange,
-                    "{\"success\":false,\"message\":\"" +
-                            escape(e.getMessage()) + "\"}");
-        }
+        sendJson(exchange,
+                "{\"success\":true,\"message\":\"Product added successfully\"}");
     }
 
-    // POST /api/update
     private static void handleUpdate(HttpExchange exchange)
             throws IOException {
 
@@ -146,39 +81,30 @@ public class Main {
         Map<String, String> data =
                 parseForm(readBody(exchange));
 
-        String sql =
-                "UPDATE products SET name=?, category=?, quantity=?, price=? " +
-                "WHERE id=?";
+        int id =
+                Integer.parseInt(data.get("id"));
 
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+        for (Map<String, Object> p : products) {
 
-            stmt.setString(1, data.get("name"));
-            stmt.setString(2, data.get("category"));
-            stmt.setInt(3, Integer.parseInt(data.get("quantity")));
-            stmt.setBigDecimal(4,
-                    new java.math.BigDecimal(data.get("price")));
-            stmt.setInt(5, Integer.parseInt(data.get("id")));
+            if ((int) p.get("id") == id) {
 
-            int rows = stmt.executeUpdate();
+                p.put("name", data.get("name"));
+                p.put("category", data.get("category"));
+                p.put("quantity",
+                        Integer.parseInt(data.get("quantity")));
+                p.put("price",
+                        Double.parseDouble(data.get("price")));
 
-            if (rows > 0) {
                 sendJson(exchange,
                         "{\"success\":true,\"message\":\"Product updated successfully\"}");
-            } else {
-                sendJson(exchange,
-                        "{\"success\":false,\"message\":\"Product not found\"}");
+                return;
             }
-
-        } catch (Exception e) {
-
-            sendJson(exchange,
-                    "{\"success\":false,\"message\":\"" +
-                            escape(e.getMessage()) + "\"}");
         }
+
+        sendJson(exchange,
+                "{\"success\":false,\"message\":\"Product not found\"}");
     }
 
-    // POST /api/delete
     private static void handleDelete(HttpExchange exchange)
             throws IOException {
 
@@ -190,32 +116,21 @@ public class Main {
         Map<String, String> data =
                 parseForm(readBody(exchange));
 
-        String sql = "DELETE FROM products WHERE id=?";
+        int id =
+                Integer.parseInt(data.get("id"));
 
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+        boolean removed =
+                products.removeIf(p -> (int) p.get("id") == id);
 
-            stmt.setInt(1, Integer.parseInt(data.get("id")));
-
-            int rows = stmt.executeUpdate();
-
-            if (rows > 0) {
-                sendJson(exchange,
-                        "{\"success\":true,\"message\":\"Product deleted successfully\"}");
-            } else {
-                sendJson(exchange,
-                        "{\"success\":false,\"message\":\"Product not found\"}");
-            }
-
-        } catch (Exception e) {
-
+        if (removed) {
             sendJson(exchange,
-                    "{\"success\":false,\"message\":\"" +
-                            escape(e.getMessage()) + "\"}");
+                    "{\"success\":true,\"message\":\"Product deleted successfully\"}");
+        } else {
+            sendJson(exchange,
+                    "{\"success\":false,\"message\":\"Product not found\"}");
         }
     }
 
-    // GET /api/search?query=laptop
     private static void handleSearch(HttpExchange exchange)
             throws IOException {
 
@@ -226,102 +141,107 @@ public class Main {
 
         String query = "";
 
-        String request = exchange.getRequestURI().getQuery();
+        String request =
+                exchange.getRequestURI().getQuery();
 
         if (request != null && request.startsWith("query=")) {
+
             query = URLDecoder.decode(
                     request.substring(6),
                     StandardCharsets.UTF_8);
         }
 
-        StringBuilder json = new StringBuilder("[");
+        query = query.toLowerCase();
+
+        List<Map<String, Object>> result =
+                new ArrayList<>();
+
+        for (Map<String, Object> p : products) {
+
+            String name =
+                    p.get("name").toString().toLowerCase();
+
+            String category =
+                    p.get("category").toString().toLowerCase();
+
+            if (name.contains(query) ||
+                    category.contains(query)) {
+
+                result.add(p);
+            }
+        }
+
+        sendJson(exchange, productsToJson(result));
+    }
+
+    private static String productsToJson(
+            List<Map<String, Object>> list) {
+
+        StringBuilder json =
+                new StringBuilder("[");
+
         boolean first = true;
 
-        String sql =
-                "SELECT * FROM products " +
-                "WHERE name LIKE ? OR category LIKE ? " +
-                "ORDER BY id";
+        for (Map<String, Object> p : list) {
 
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            String value = "%" + query + "%";
-
-            stmt.setString(1, value);
-            stmt.setString(2, value);
-
-            ResultSet rs = stmt.executeQuery();
-
-            while (rs.next()) {
-
-                if (!first) {
-                    json.append(",");
-                }
-
-                json.append("{");
-                json.append("\"id\":").append(rs.getInt("id")).append(",");
-                json.append("\"name\":\"")
-                        .append(escape(rs.getString("name"))).append("\",");
-                json.append("\"category\":\"")
-                        .append(escape(rs.getString("category"))).append("\",");
-                json.append("\"quantity\":")
-                        .append(rs.getInt("quantity")).append(",");
-                json.append("\"price\":")
-                        .append(rs.getBigDecimal("price"));
-                json.append("}");
-
-                first = false;
+            if (!first) {
+                json.append(",");
             }
 
-        } catch (SQLException e) {
+            json.append("{");
+            json.append("\"id\":").append(p.get("id")).append(",");
+            json.append("\"name\":\"")
+                    .append(escape(p.get("name").toString()))
+                    .append("\",");
+            json.append("\"category\":\"")
+                    .append(escape(p.get("category").toString()))
+                    .append("\",");
+            json.append("\"quantity\":")
+                    .append(p.get("quantity")).append(",");
+            json.append("\"price\":")
+                    .append(p.get("price"));
+            json.append("}");
 
-            sendJson(exchange,
-                    "{\"error\":\"Database error\"}");
-
-            return;
+            first = false;
         }
 
         json.append("]");
 
-        sendJson(exchange, json.toString());
+        return json.toString();
     }
 
     private static String readBody(HttpExchange exchange)
             throws IOException {
 
-        InputStream input = exchange.getRequestBody();
-
         return new String(
-                input.readAllBytes(),
+                exchange.getRequestBody().readAllBytes(),
                 StandardCharsets.UTF_8);
     }
 
     private static Map<String, String> parseForm(String body)
             throws UnsupportedEncodingException {
 
-        Map<String, String> map = new HashMap<>();
+        Map<String, String> map =
+                new HashMap<>();
 
         if (body == null || body.isEmpty()) {
             return map;
         }
 
-        String[] pairs = body.split("&");
+        for (String pair : body.split("&")) {
 
-        for (String pair : pairs) {
+            String[] parts =
+                    pair.split("=", 2);
 
-            String[] parts = pair.split("=", 2);
+            String key =
+                    URLDecoder.decode(parts[0],
+                            StandardCharsets.UTF_8);
 
-            String key = URLDecoder.decode(
-                    parts[0],
-                    StandardCharsets.UTF_8);
-
-            String value = "";
-
-            if (parts.length > 1) {
-                value = URLDecoder.decode(
-                        parts[1],
-                        StandardCharsets.UTF_8);
-            }
+            String value =
+                    parts.length > 1
+                            ? URLDecoder.decode(parts[1],
+                            StandardCharsets.UTF_8)
+                            : "";
 
             map.put(key, value);
         }
@@ -345,10 +265,10 @@ public class Main {
 
         exchange.sendResponseHeaders(200, bytes.length);
 
-        try (OutputStream output =
+        try (OutputStream out =
                      exchange.getResponseBody()) {
 
-            output.write(bytes);
+            out.write(bytes);
         }
     }
 
@@ -363,21 +283,18 @@ public class Main {
 
         exchange.sendResponseHeaders(status, bytes.length);
 
-        try (OutputStream output =
+        try (OutputStream out =
                      exchange.getResponseBody()) {
 
-            output.write(bytes);
+            out.write(bytes);
         }
     }
 
     private static String escape(String value) {
 
-        if (value == null) {
-            return "";
-        }
-
-        return value
-                .replace("\\", "\\\\")
+        return value == null
+                ? ""
+                : value.replace("\\", "\\\\")
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r");
