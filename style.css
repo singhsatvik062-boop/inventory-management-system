@@ -123,3 +123,20 @@ th {
 tr:hover {
     background-color: #f5f5f5;
 }
+/* DSA Enhancement: Highlight Low Stock Products */
+.low-stock {
+    background-color: #fff3cd;
+    color: #856404;
+    font-weight: bold;
+}
+
+/* Optional: Smooth hover effect for action buttons */
+.edit-btn,
+.delete-btn {
+    transition: 0.3s ease;
+}
+
+.edit-btn:hover,
+.delete-btn:hover {
+    transform: scale(1.05);
+}
