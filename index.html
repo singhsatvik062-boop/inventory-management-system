@@ -342,19 +342,24 @@
         </h2>
 
         <div class="search">
+    <input
+        type="text"
+        id="searchInput"
+        placeholder="Search by name or category..."
+        onkeyup="searchProducts()">
 
-            <input
-                type="text"
-                id="searchInput"
-                placeholder="Search by name or category..."
-                onkeyup="searchProducts()"
-            >
+    <button onclick="sortProductsByName()">
+        Sort A-Z
+    </button>
 
-            <button onclick="loadProducts()">
-                Refresh
-            </button>
+    <button onclick="undoDelete()">
+        Undo
+    </button>
 
-        </div>
+    <button onclick="loadProducts()">
+        Refresh
+    </button>
+</div>
 
         <div style="overflow-x:auto;">
 
