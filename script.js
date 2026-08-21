@@ -1,44 +1,227 @@
-const productForm = document.getElementById("productForm");
-const productTable = document.getElementById("productTable");
 
-let productId = 1;
+const API = "http://localhost:8080";
 
-productForm.addEventListener("submit", function (event) {
+// =======================
+// DSA DATA STRUCTURES
+// =======================
 
-    event.preventDefault();
+// Hash Map for O(1) lookup
+const productMap = new Map();
 
-    const name = document.getElementById("productName").value;
-    const category = document.getElementById("category").value;
-    const quantity = document.getElementById("quantity").value;
-    const price = document.getElementById("price").value;
+// Stack for Undo Delete
+const undoStack = [];
 
-    const row = document.createElement("tr");
+// Queue for Notifications
+const messageQueue = [];
+let processingMessage = false;
 
-    row.innerHTML = `
-        <td>${productId}</td>
-        <td>${name}</td>
-        <td>${category}</td>
-        <td>${quantity}</td>
-        <td>₹${price}</td>
-        <td>
-            <button onclick="deleteProduct(this)">
-                Delete
-            </button>
-        </td>
-    `;
+// =======================
+// LOAD PRODUCTS
+// =======================
 
-    productTable.appendChild(row);
+async function loadProducts() {
+    try {
+        const response = await fetch(API + "/api/products");
+        const products = await response.json();
 
-    productId++;
+        productMap.clear();
 
-    productForm.reset();
-});
+        products.forEach(product => {
+            productMap.set(product.id, product);
+        });
 
+        displayProducts(products);
 
-function deleteProduct(button) {
-
-    const row = button.parentElement.parentElement;
-
-    row.remove();
-
+    } catch {
+        enqueueMessage("Backend not running.", false);
+    }
 }
+
+// =======================
+// DISPLAY PRODUCTS
+// =======================
+
+function displayProducts(products) {
+
+    const table = document.getElementById("productTable");
+    table.innerHTML = "";
+
+    let totalQuantity = 0;
+    let totalValue = 0;
+
+    products.forEach(product => {
+
+        totalQuantity += Number(product.quantity);
+        totalValue += Number(product.quantity) * Number(product.price);
+
+        table.innerHTML += `
+        <tr>
+            <td>${product.id}</td>
+            <td>${product.name}</td>
+            <td>${product.category}</td>
+            <td>${product.quantity}</td>
+            <td>₹${Number(product.price).toFixed(2)}</td>
+            <td>
+                <button class="edit-btn" onclick="editProductById(${product.id})">Edit</button>
+                <button class="delete-btn" onclick="deleteProduct(${product.id})">Delete</button>
+            </td>
+        </tr>`;
+    });
+
+    document.getElementById("totalProducts").textContent = products.length;
+    document.getElementById("totalQuantity").textContent = totalQuantity;
+    document.getElementById("totalValue").textContent = "₹" + totalValue.toFixed(2);
+}
+
+// =======================
+// EDIT USING HASH MAP
+// O(1)
+// =======================
+
+function editProductById(id){
+
+    const product = productMap.get(id);
+
+    if(!product) return;
+
+    document.getElementById("productId").value = product.id;
+    document.getElementById("name").value = product.name;
+    document.getElementById("category").value = product.category;
+    document.getElementById("quantity").value = product.quantity;
+    document.getElementById("price").value = product.price;
+
+    document.getElementById("formTitle").textContent = "Update Product";
+}
+
+// =======================
+// DELETE + STACK
+// =======================
+
+async function deleteProduct(id){
+
+    const product = productMap.get(id);
+
+    if(!product) return;
+
+    if(!confirm("Delete this product?")) return;
+
+    undoStack.push({...product});
+
+    const data = new URLSearchParams();
+    data.append("id", id);
+
+    const response = await fetch(API+"/api/delete",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded"
+        },
+        body:data
+    });
+
+    const result = await response.json();
+
+    enqueueMessage(result.message,true);
+
+    loadProducts();
+}
+
+// =======================
+// UNDO DELETE
+// =======================
+
+async function undoDelete(){
+
+    if(undoStack.length===0){
+        enqueueMessage("Nothing to undo",false);
+        return;
+    }
+
+    const product = undoStack.pop();
+
+    const data = new URLSearchParams();
+
+    data.append("name",product.name);
+    data.append("category",product.category);
+    data.append("quantity",product.quantity);
+    data.append("price",product.price);
+
+    await fetch(API+"/api/add",{
+        method:"POST",
+        headers:{
+            "Content-Type":"application/x-www-form-urlencoded"
+        },
+        body:data
+    });
+
+    enqueueMessage("Product restored",true);
+
+    loadProducts();
+}
+
+// =======================
+// SEARCH USING HASH MAP
+// =======================
+
+function searchProducts(){
+
+    const query = document.getElementById("searchInput").value.toLowerCase();
+
+    const filtered = [...productMap.values()].filter(product=>
+
+        product.name.toLowerCase().includes(query) ||
+
+        product.category.toLowerCase().includes(query)
+
+    );
+
+    displayProducts(filtered);
+}
+
+// =======================
+// SORT A-Z
+// =======================
+
+function sortProductsByName(){
+
+    const sorted = [...productMap.values()]
+        .sort((a,b)=>a.name.localeCompare(b.name));
+
+    displayProducts(sorted);
+}
+
+// =======================
+// QUEUE
+// =======================
+
+function enqueueMessage(text,success){
+
+    messageQueue.push({text,success});
+
+    if(!processingMessage){
+        processQueue();
+    }
+}
+
+function processQueue(){
+
+    if(messageQueue.length===0){
+        processingMessage=false;
+        return;
+    }
+
+    processingMessage=true;
+
+    const msg = messageQueue.shift();
+
+    const box = document.getElementById("message");
+
+    box.textContent = msg.text;
+    box.className = msg.success ? "message success":"message error";
+
+    setTimeout(()=>{
+        box.className="message";
+        processQueue();
+    },2000);
+}
+
+loadProducts();
